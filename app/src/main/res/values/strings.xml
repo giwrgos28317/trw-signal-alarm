@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TRW Signal Watcher</string>
+    <string name="header_title">TRW Portfolio Watcher</string>
+    <string name="saved_signal_title">Αποθηκευμένο Signal (saved_signal):</string>
+    <string name="no_signal_saved">Κανένα αποθηκευμένο signal ακόμη.\nΣυνδεθείτε στο κανάλι και πατήστε «Read &amp; Save Current Signal».</string>
+    <string name="btn_read_signal">Read &amp; Save Current Signal</string>
+    <string name="switch_daily_alarm">Daily 02:00 AM Watch</string>
+    <string name="alarm_status_off">Κατάσταση: Ανενεργό</string>
+    <string name="alarm_status_on">Κατάσταση: Ενεργό (Επόμενος έλεγχος: 02:00:00 π.μ.)</string>
+    <string name="btn_test_alarm">Test Alarm Sound</string>
+    <string name="btn_stop_alarm">Stop Alarm</string>
+    <string name="new_signal_alert_title">🚨 ΝΕΟ SIGNAL ΕΝΤΟΠΙΣΤΗΚΕ! 🚨</string>
+    <string name="night_check_status">Νυχτερινός έλεγχος σε εξέλιξη (02:00 - 02:10 π.μ.)...</string>
+</resources>

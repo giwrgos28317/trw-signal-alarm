@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/black"
+    tools:context=".NightCheckActivity">
+
+    <!-- 1. Hidden / Dim Background WebView Container (Active for executing JS & Network) -->
+    <FrameLayout
+        android:id="@+id/layoutWebContainer"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+        <WebView
+            android:id="@+id/nightWebView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:alpha="0.05" />
+
+        <!-- Black Scrim Overlay to keep screen completely dark during checks -->
+        <View
+            android:id="@+id/blackScrim"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@color/black" />
+
+        <!-- Minimal Discreet Night Status (barely visible at 0.01 brightness) -->
+        <LinearLayout
+            android:id="@+id/layoutCheckingStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom|center_horizontal"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/tvNightCheckStatus"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/night_check_status"
+                android:textColor="#333333"
+                android:textSize="10sp" />
+
+            <TextView
+                android:id="@+id/tvNightTimeElapsed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="02:00:00 AM"
+                android:textColor="#222222"
+                android:textSize="9sp" />
+        </LinearLayout>
+    </FrameLayout>
+
+    <!-- 2. Alarm Triggered Layout (Visible only when a NEW Signal is detected) -->
+    <LinearLayout
+        android:id="@+id/layoutAlarmTriggered"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:background="@color/black"
+        android:padding="24dp"
+        android:gravity="center"
+        android:visibility="gone">
+
+        <!-- Flashing Alarm Header Icon & Title -->
+        <ImageView
+            android:id="@+id/ivAlarmIcon"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:src="@drawable/ic_alarm"
+            app:tint="@color/alarm_red"
+            android:contentDescription="Alarm" />
+
+        <TextView
+            android:id="@+id/tvAlarmTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/new_signal_alert_title"
+            android:textColor="@color/alarm_red"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:gravity="center" />
+
+        <!-- Box displaying the extracted new signal text -->
+        <androidx.core.widget.NestedScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:layout_marginTop="16dp"
+            android:layout_marginBottom="24dp"
+            android:background="@drawable/bg_card"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/tvNewSignalContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/white"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:lineSpacingExtra="4dp"
+                tools:text="Portfolio Signal Update: BUY XYZ ... @I Understand The Signals" />
+        </androidx.core.widget.NestedScrollView>
+
+        <!-- Huge Red STOP ALARM Button -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStopNightAlarm"
+            android:layout_width="match_parent"
+            android:layout_height="72dp"
+            android:text="STOP ALARM"
+            android:textColor="@color/white"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:backgroundTint="@color/alarm_red"
+            app:cornerRadius="16dp"
+            app:strokeColor="@color/white"
+            app:strokeWidth="2dp" />
+
+    </LinearLayout>
+
+</FrameLayout>
