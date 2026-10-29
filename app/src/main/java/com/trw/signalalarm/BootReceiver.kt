@@ -24,8 +24,8 @@ class BootReceiver : BroadcastReceiver() {
             Log.d(TAG, "Watch is enabled in preferences: $isEnabled")
 
             if (isEnabled) {
-                AlarmScheduler.scheduleDailyAlarm(context)
-                Log.d(TAG, "Rescheduled daily 02:00 AM alarm after reboot successfully.")
+                AlarmScheduler.scheduleDailyAlarms(context)
+                Log.d(TAG, "Rescheduled daily 02:13 AM & 03:30 AM alarms after reboot successfully.")
             }
         }
     }

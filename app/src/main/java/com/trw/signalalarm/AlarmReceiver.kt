@@ -19,7 +19,11 @@ class AlarmReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
-        Log.d(TAG, "AlarmReceiver triggered at 02:00 AM! Action=${intent?.action}")
+        val alarmHour = intent?.getIntExtra("EXTRA_ALARM_HOUR", 2) ?: 2
+        val alarmMinute = intent?.getIntExtra("EXTRA_ALARM_MINUTE", 13) ?: 13
+        val formattedTime = String.format("%02d:%02d", alarmHour, alarmMinute)
+
+        Log.d(TAG, "AlarmReceiver triggered at $formattedTime AM! Action=${intent?.action}")
 
         // 1. Acquire temporary WakeLock to ensure CPU stays awake while launching Activity
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
@@ -35,11 +39,12 @@ class AlarmReceiver : BroadcastReceiver() {
         // 3. Prepare Intent for NightCheckActivity
         val nightCheckIntent = Intent(context, NightCheckActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("EXTRA_TRIGGER_TIME", formattedTime)
         }
 
         val fullScreenPendingIntent = PendingIntent.getActivity(
             context,
-            Constants.ALARM_REQUEST_CODE,
+            Constants.REQUEST_CODE_ALARM_1,
             nightCheckIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -47,8 +52,8 @@ class AlarmReceiver : BroadcastReceiver() {
         // 4. Build Full Screen Alarm Notification (guarantees waking screen on locked device)
         val notification = NotificationCompat.Builder(context, Constants.NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_alarm)
-            .setContentTitle("TRW Portfolio Watcher")
-            .setContentText("02:00 AM Signal Check in progress...")
+            .setContentTitle("TRW Portfolio Watcher ($formattedTime π.μ.)")
+            .setContentText("Νυχτερινός έλεγχος για νέο Signal...")
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setFullScreenIntent(fullScreenPendingIntent, true)
@@ -65,7 +70,7 @@ class AlarmReceiver : BroadcastReceiver() {
         // 5. Directly start NightCheckActivity
         try {
             context.startActivity(nightCheckIntent)
-            Log.d(TAG, "Successfully started NightCheckActivity")
+            Log.d(TAG, "Successfully started NightCheckActivity for $formattedTime AM check")
         } catch (e: Exception) {
             Log.e(TAG, "Could not directly start activity: ${e.message}", e)
         } finally {
@@ -82,7 +87,7 @@ class AlarmReceiver : BroadcastReceiver() {
     private fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = "TRW Night Alarm & Check"
-            val descriptionText = "Executes automated 02:00 AM checks and triggers portfolio signal alerts"
+            val descriptionText = "Executes automated 02:13 & 03:30 AM checks and triggers portfolio signal alerts"
             val importance = NotificationManager.IMPORTANCE_HIGH
             val channel = NotificationChannel(Constants.NOTIFICATION_CHANNEL_ID, name, importance).apply {
                 description = descriptionText

@@ -83,7 +83,7 @@ class MainActivity : AppCompatActivity() {
             readAndSaveCurrentSignal()
         }
 
-        // 3. Daily 02:00 AM Watch Switch
+        // 3. Dual Alarm Switch (02:13 & 03:30 AM)
         val isWatchEnabled = AlarmScheduler.isWatchEnabled(this)
         binding.switchDailyAlarm.isChecked = isWatchEnabled
         updateAlarmStatusText(isWatchEnabled)
@@ -91,17 +91,17 @@ class MainActivity : AppCompatActivity() {
         binding.switchDailyAlarm.setOnCheckedChangeListener { _, isChecked ->
             if (isChecked) {
                 checkAndRequestPermissions()
-                AlarmScheduler.scheduleDailyAlarm(this)
+                AlarmScheduler.scheduleDailyAlarms(this)
                 updateAlarmStatusText(true)
                 Toast.makeText(
                     this,
-                    "Ενεργοποιήθηκε! Έλεγχος στις 02:00:00 π.μ.\n${AlarmScheduler.getNextAlarmFormatted()}",
+                    "Ενεργοποιήθηκε!\n${AlarmScheduler.getNextAlarmFormatted()}",
                     Toast.LENGTH_LONG
                 ).show()
             } else {
-                AlarmScheduler.cancelDailyAlarm(this)
+                AlarmScheduler.cancelDailyAlarms(this)
                 updateAlarmStatusText(false)
-                Toast.makeText(this, "Ο νυχτερινός έλεγχος απενεργοποιήθηκε.", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Οι νυχτερινοί έλεγχοι απενεργοποιήθηκαν.", Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -153,7 +153,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateAlarmStatusText(isEnabled: Boolean) {
         if (isEnabled) {
-            binding.tvAlarmStatus.text = "Ενεργό: ${AlarmScheduler.getNextAlarmFormatted()}"
+            binding.tvAlarmStatus.text = AlarmScheduler.getNextAlarmFormatted()
             binding.tvAlarmStatus.setTextColor(ContextCompat.getColor(this, R.color.alarm_green))
         } else {
             binding.tvAlarmStatus.text = getString(R.string.alarm_status_off)
@@ -263,7 +263,7 @@ class MainActivity : AppCompatActivity() {
             if (alarmManager?.canScheduleExactAlarms() == false) {
                 AlertDialog.Builder(this)
                     .setTitle("Απαραίτητη Άδεια Exact Alarm")
-                    .setMessage("Για να μπορεί η εφαρμογή να εκτελεί τον ακριβή έλεγχο στις 02:00:00 π.μ., παρακαλούμε ενεργοποιήστε την άδεια ακριβούς ξυπνητηριού.")
+                    .setMessage("Για να εκτελούνται αυτόματα οι ακριβείς έλεγχοι στις 02:13 & 03:30 π.μ., παρακαλούμε ενεργοποιήστε την άδεια ακριβούς ξυπνητηριού.")
                     .setPositiveButton("Ρυθμίσεις") { _, _ ->
                         try {
                             val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {

@@ -39,9 +39,12 @@ class NightCheckActivity : AppCompatActivity() {
     private var checkStartTime: Long = 0L
     private var isAlarmTriggered = false
     private var checkCount = 0
+    private var triggerSlot: String = "02:13"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        triggerSlot = intent.getStringExtra("EXTRA_TRIGGER_TIME") ?: "02:13"
 
         // 1. Configure Window Flags to Turn Screen On and Show Over Lockscreen
         setupLockscreenWakeFlags()
@@ -66,7 +69,7 @@ class NightCheckActivity : AppCompatActivity() {
         // 5. Initialize WebView for TRW
         setupNightWebView()
 
-        // 6. Start the 02:00 to 02:10 AM checking cycle
+        // 6. Start the checking cycle (10-minute window)
         startCheckCycle()
     }
 
@@ -127,7 +130,7 @@ class NightCheckActivity : AppCompatActivity() {
     }
 
     /**
-     * Starts or repeats the checking cycle every 45 seconds from 02:00 to 02:10 AM.
+     * Repeats check cycle every 45 seconds for a 10-minute window.
      */
     private fun startCheckCycle() {
         if (isAlarmTriggered || isFinishing || isDestroyed) return
@@ -135,9 +138,9 @@ class NightCheckActivity : AppCompatActivity() {
         val now = System.currentTimeMillis()
         val elapsed = now - checkStartTime
 
-        // Check if 10-minute window has expired (passed 02:10 AM)
+        // Check if 10-minute window has expired
         if (elapsed >= Constants.MAX_CHECK_DURATION_MS) {
-            Log.d(TAG, "Check duration exceeded 10 minutes (02:10 AM reached). No new signal. Finishing silently.")
+            Log.d(TAG, "Check duration exceeded 10 minutes for $triggerSlot slot. No new signal. Finishing silently.")
             finishSilentlyAndReschedule()
             return
         }
@@ -145,9 +148,9 @@ class NightCheckActivity : AppCompatActivity() {
         checkCount++
         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         val formattedTime = sdf.format(Date(now))
-        binding.tvNightTimeElapsed.text = "Έλεγχος #$checkCount στις $formattedTime"
+        binding.tvNightTimeElapsed.text = "Έλεγχος slot $triggerSlot (#$checkCount στις $formattedTime)"
 
-        Log.d(TAG, "Starting Check #$checkCount at $formattedTime (Elapsed: ${elapsed / 1000}s)")
+        Log.d(TAG, "Starting Check #$checkCount for slot $triggerSlot at $formattedTime (Elapsed: ${elapsed / 1000}s)")
 
         // 1. Reload the target chat page
         binding.nightWebView.loadUrl(Constants.TARGET_URL)
@@ -174,7 +177,7 @@ class NightCheckActivity : AppCompatActivity() {
             if (latestSignal.isNotBlank()) {
                 // If savedSignal is empty, or latestSignal differs from savedSignal
                 if (savedSignal.isEmpty() || latestSignal != savedSignal) {
-                    Log.i(TAG, "🚨 NEW SIGNAL DETECTED! Triggering Alarm! 🚨")
+                    Log.i(TAG, "🚨 NEW SIGNAL DETECTED at $triggerSlot! Triggering Alarm! 🚨")
                     onNewSignalDetected(latestSignal)
                     return@extractLatestSignal
                 } else {
@@ -226,8 +229,8 @@ class NightCheckActivity : AppCompatActivity() {
         Log.d(TAG, "User clicked STOP ALARM")
         AlarmSoundManager.stopAlarm(this)
 
-        // Reschedule alarm for tomorrow at 02:00 AM
-        AlarmScheduler.scheduleDailyAlarm(this)
+        // Reschedule upcoming daily alarms
+        AlarmScheduler.scheduleDailyAlarms(this)
 
         // Dismiss notification
         NotificationManagerCompat.from(this).cancel(Constants.NOTIFICATION_ID)
@@ -237,13 +240,13 @@ class NightCheckActivity : AppCompatActivity() {
     }
 
     /**
-     * Silently finish activity when 02:10 AM is reached without new signal.
+     * Silently finish activity when 10 minutes pass without a new signal.
      */
     private fun finishSilentlyAndReschedule() {
         checkHandler.removeCallbacksAndMessages(null)
 
-        // Reschedule alarm for tomorrow at 02:00 AM
-        AlarmScheduler.scheduleDailyAlarm(this)
+        // Reschedule upcoming daily alarms
+        AlarmScheduler.scheduleDailyAlarms(this)
 
         // Dismiss notification
         NotificationManagerCompat.from(this).cancel(Constants.NOTIFICATION_ID)
