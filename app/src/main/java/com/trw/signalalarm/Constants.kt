@@ -6,6 +6,7 @@ object Constants {
     // SharedPreferences Keys
     const val PREFS_NAME = "trw_alarm_prefs"
     const val PREF_SAVED_SIGNAL = "saved_signal"
+    const val PREF_SAVED_REACTION = "saved_reaction"
     const val PREF_LAST_CHECK_TIME = "last_check_time"
 
     // Dynamic Check 1 Settings (Default: 02:13 AM)
@@ -31,5 +32,5 @@ object Constants {
     // Night Check Timing Constants
     const val PAGE_LOAD_WAIT_MS = 15_000L      // 15 seconds wait after load for dynamic DOM
     const val CHECK_INTERVAL_MS = 45_000L      // 45 seconds repeat interval
-    const val MAX_CHECK_ATTEMPTS = 8           // Up to 8 attempts if isToday is false or retrying
+    const val MAX_CHECK_ATTEMPTS = 8           // Up to 8 attempts per scheduled check
 }

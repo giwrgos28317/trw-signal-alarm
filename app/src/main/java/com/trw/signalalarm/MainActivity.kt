@@ -204,12 +204,21 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun updateStatusDisplay() {
+    private fun updateStatusDisplay(latestReaction: Int? = null, prevReaction: Int? = null) {
         val saved = prefs.getString(Constants.PREF_SAVED_SIGNAL, "") ?: ""
         if (saved.isNotBlank()) {
             binding.tvSavedSignal.text = saved
         } else {
             binding.tvSavedSignal.text = getString(R.string.no_signal_saved)
+        }
+
+        val savedReaction = prefs.getInt(Constants.PREF_SAVED_REACTION, -1)
+        if (latestReaction != null && prevReaction != null) {
+            binding.tvSavedReactions.text = "Last Reaction Count: $latestReaction (Prev msg: $prevReaction)"
+        } else if (savedReaction >= 0) {
+            binding.tvSavedReactions.text = "Saved First Reaction: $savedReaction"
+        } else {
+            binding.tvSavedReactions.text = "Last Reaction Count: - (Prev msg: -)"
         }
 
         val lastCheck = prefs.getString(Constants.PREF_LAST_CHECK_TIME, "") ?: ""
@@ -221,43 +230,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Reads the current rendered DOM of the WebView, extracts the signal,
-     * checks for Today validity, saves it to SharedPreferences, and updates the UI.
+     * Reads the current rendered DOM of the WebView, extracts latest & previous signals and reactions,
+     * saves them to SharedPreferences, and updates the UI.
      */
     private fun readAndSaveCurrentSignal() {
-        Toast.makeText(this, "Ανάγνωση σήματος και κύλιση κάτω...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Ανάγνωση σημάτων & reactions...", Toast.LENGTH_SHORT).show()
 
         // 1. First trigger auto-scroll
         SignalExtractor.scrollToBottom(binding.webView) {
-            // 2. Extract signal
+            // 2. Extract signals and reactions
             SignalExtractor.extractLatestSignal(binding.webView) { result ->
-                if (result.signal.isNotBlank()) {
+                if (result.latestSignal.isNotBlank()) {
                     val now = System.currentTimeMillis()
                     val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
                     val formattedDate = sdf.format(Date(now))
 
                     prefs.edit()
-                        .putString(Constants.PREF_SAVED_SIGNAL, result.signal)
+                        .putString(Constants.PREF_SAVED_SIGNAL, result.latestSignal)
+                        .putInt(Constants.PREF_SAVED_REACTION, result.latestReaction)
                         .putString(Constants.PREF_LAST_CHECK_TIME, formattedDate)
                         .apply()
 
-                    updateStatusDisplay()
-
-                    val title = if (result.isToday) {
-                        "✅ Σημερινό Signal Αποθηκεύτηκε!"
-                    } else {
-                        "⚠️ Signal Αποθηκεύτηκε (Χωρίς 'Today')"
-                    }
-
-                    val message = if (result.isToday) {
-                        "Το σημερινό signal αποθηκεύτηκε επιτυχώς:\n\n${result.signal}"
-                    } else {
-                        "Προσοχή: Δεν εντοπίστηκε διαχωριστικό 'Today' πριν από το μήνυμα (πιθανώς παλιό μήνυμα ή δεν έγινε scroll στο τέλος).\n\nSignal:\n${result.signal}"
-                    }
+                    updateStatusDisplay(result.latestReaction, result.prevReaction)
 
                     AlertDialog.Builder(this)
-                        .setTitle(title)
-                        .setMessage(message)
+                        .setTitle("✅ Signal & Reactions Αποθηκεύτηκαν!")
+                        .setMessage("Τελευταίο Signal:\n${result.latestSignal}\n\nReactions:\n• Last Reaction Count: ${result.latestReaction}\n• Prev msg Reaction: ${result.prevReaction}\n(Βρέθηκαν ${result.totalMessagesFound} μηνύματα στο chat)")
                         .setPositiveButton("OK", null)
                         .show()
                 } else {

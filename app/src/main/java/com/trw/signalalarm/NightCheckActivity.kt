@@ -174,96 +174,111 @@ class NightCheckActivity : AppCompatActivity() {
     }
 
     /**
-     * Evaluates the extracted signal and applies the Today logic:
-     * - If isToday == false: do NOT compare with saved_signal; retry in next attempt.
-     * - If isToday == true: compare with saved_signal; if different, alarm!
+     * Evaluates signals and reaction counts according to the reaction-drop mathematical criteria:
+     * - isNewPost = (latestReaction < saved_reaction) || (prevReaction > 0 && latestReaction < prevReaction * 0.65 && prevSignal == saved_signal)
+     * - If isNewPost == false: no alarm, silently update saved_reaction if increased, retry in 45s.
+     * - If isNewPost == true: update saved_signal & saved_reaction.
+     *   - If latestSignal == saved_signal: silent finish without alarm.
+     *   - If latestSignal != saved_signal: TRIGGER LOUD ALARM!
      */
     private fun evaluateExtractedSignal() {
         SignalExtractor.extractLatestSignal(binding.nightWebView) { result ->
             if (isAlarmTriggered || isFinishing || isDestroyed) return@extractLatestSignal
 
-            Log.d(TAG, "Attempt #$checkAttempt: isToday=${result.isToday}, signalLength=${result.signal.length}")
+            val savedSignal = prefs.getString(Constants.PREF_SAVED_SIGNAL, "") ?: ""
+            val savedReaction = prefs.getInt(Constants.PREF_SAVED_REACTION, -1)
 
-            // 1. If NOT Today: do NOT compare with old messages!
-            if (!result.isToday) {
-                Log.w(TAG, "Attempt #$checkAttempt: isToday is FALSE. Message is from yesterday or not posted yet. Skipping comparison.")
+            val latestSignal = result.latestSignal
+            val latestReaction = result.latestReaction
+            val prevSignal = result.prevSignal
+            val prevReaction = result.prevReaction
 
-                if (checkAttempt >= Constants.MAX_CHECK_ATTEMPTS) {
-                    Log.d(TAG, "Max attempts reached with isToday=false. Finishing silently.")
-                    finishSilentlyAndReschedule()
-                    return@extractLatestSignal
-                }
+            Log.d(TAG, "Attempt #$checkAttempt Evaluation:")
+            Log.d(TAG, "latestReaction=$latestReaction, savedReaction=$savedReaction, prevReaction=$prevReaction")
+            Log.d(TAG, "latestSignalLength=${latestSignal.length}, savedSignalLength=${savedSignal.length}, totalFound=${result.totalMessagesFound}")
 
-                // Schedule next attempt in 45s cycle
-                val remainingWait = (Constants.CHECK_INTERVAL_MS - Constants.PAGE_LOAD_WAIT_MS - 1500L).coerceAtLeast(10_000L)
-                binding.tvNightCheckStatus.text = "Αναμονή για σημερινό signal... Επανάληψη σε 45s (#$checkAttempt/${Constants.MAX_CHECK_ATTEMPTS})"
-                checkHandler.postDelayed({
-                    startCheckAttempt()
-                }, remainingWait)
+            if (latestSignal.isBlank()) {
+                Log.w(TAG, "latestSignal is blank (chat page not yet loaded). Retrying in 45s...")
+                retryNextAttemptOrFinish()
                 return@extractLatestSignal
             }
 
-            // 2. isToday is TRUE: compare with saved_signal
-            val savedSignal = prefs.getString(Constants.PREF_SAVED_SIGNAL, "") ?: ""
-            Log.d(TAG, "Attempt #$checkAttempt: isToday is TRUE! Comparing with saved_signal.")
-            Log.d(TAG, "Saved: $savedSignal")
-            Log.d(TAG, "New: ${result.signal}")
+            // Criterion for a Fresh Post:
+            // 1. latestReaction dropped below saved_reaction (e.g. 45 < 671)
+            // 2. Or: latestReaction is significantly lower than prevReaction (< 65%) and prevSignal equals saved_signal
+            val condition1 = (savedReaction > 0 && latestReaction < savedReaction)
+            val condition2 = (prevReaction > 0 && latestReaction < (prevReaction * 0.65) && prevSignal.isNotBlank() && prevSignal == savedSignal)
+            val isNewPost = condition1 || condition2
 
-            if (result.signal.isNotBlank()) {
-                if (savedSignal.isEmpty() || result.signal != savedSignal) {
-                    Log.i(TAG, "🚨 NEW TODAY SIGNAL DETECTED at $triggerSlot! Triggering Alarm! 🚨")
-                    onNewSignalDetected(result.signal)
-                    return@extractLatestSignal
-                } else {
-                    Log.d(TAG, "Today's signal is IDENTICAL to saved_signal.")
-                    if (checkAttempt >= Constants.MAX_CHECK_ATTEMPTS) {
-                        Log.d(TAG, "All attempts finished. Signal remained identical. Finishing silently.")
-                        finishSilentlyAndReschedule()
-                    } else {
-                        val remainingWait = (Constants.CHECK_INTERVAL_MS - Constants.PAGE_LOAD_WAIT_MS - 1500L).coerceAtLeast(10_000L)
-                        binding.tvNightCheckStatus.text = "Signal ταυτόσημο με αποθηκευμένο. Επανέλεγχος σε 45s (#$checkAttempt/${Constants.MAX_CHECK_ATTEMPTS})"
-                        checkHandler.postDelayed({
-                            startCheckAttempt()
-                        }, remainingWait)
-                    }
+            Log.d(TAG, "isNewPost=$isNewPost (cond1=$condition1, cond2=$condition2)")
+
+            if (!isNewPost) {
+                // No new post detected yet (chat not updated or same post)
+                Log.d(TAG, "No new post detected yet. Skipping alarm.")
+
+                // If reactions for the same post increased, silently update saved_reaction
+                if (latestReaction > savedReaction && latestReaction > 0) {
+                    Log.d(TAG, "Silently updating saved_reaction: $savedReaction -> $latestReaction")
+                    prefs.edit().putInt(Constants.PREF_SAVED_REACTION, latestReaction).apply()
                 }
+
+                binding.tvNightCheckStatus.text = "Αναμονή για νέο post (Reactions: $latestReaction vs $savedReaction)... Επανάληψη σε 45s (#$checkAttempt/${Constants.MAX_CHECK_ATTEMPTS})"
+                retryNextAttemptOrFinish()
+                return@extractLatestSignal
+            }
+
+            // isNewPost == true: A brand new signal post was published!
+            Log.i(TAG, "🌟 NEW POST DETECTED! latestReaction=$latestReaction, savedReaction=$savedReaction, prevReaction=$prevReaction")
+
+            // Update saved_signal, saved_reaction and timestamp
+            val now = System.currentTimeMillis()
+            val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+            val formattedDate = sdf.format(Date(now))
+            prefs.edit()
+                .putString(Constants.PREF_SAVED_SIGNAL, latestSignal)
+                .putInt(Constants.PREF_SAVED_REACTION, latestReaction)
+                .putString(Constants.PREF_LAST_CHECK_TIME, formattedDate)
+                .apply()
+
+            // Compare latestSignal with old savedSignal
+            if (savedSignal.isNotBlank() && latestSignal == savedSignal) {
+                Log.i(TAG, "New post published, but signal text is IDENTICAL to previous signal (e.g. still 100% CASH). Silent finish.")
+                finishSilentlyAndReschedule()
             } else {
-                if (checkAttempt >= Constants.MAX_CHECK_ATTEMPTS) {
-                    finishSilentlyAndReschedule()
-                } else {
-                    val remainingWait = (Constants.CHECK_INTERVAL_MS - Constants.PAGE_LOAD_WAIT_MS - 1500L).coerceAtLeast(10_000L)
-                    checkHandler.postDelayed({
-                        startCheckAttempt()
-                    }, remainingWait)
-                }
+                Log.i(TAG, "🚨 NEW SIGNAL DIFFERS FROM PREVIOUS! TRIGGERING MAXIMUM ALARM! 🚨")
+                onNewSignalDetected(latestSignal)
             }
         }
     }
 
+    private fun retryNextAttemptOrFinish() {
+        if (checkAttempt >= Constants.MAX_CHECK_ATTEMPTS) {
+            Log.d(TAG, "Max attempts reached without new post. Finishing silently.")
+            finishSilentlyAndReschedule()
+        } else {
+            val remainingWait = (Constants.CHECK_INTERVAL_MS - Constants.PAGE_LOAD_WAIT_MS - 1500L).coerceAtLeast(10_000L)
+            checkHandler.postDelayed({
+                startCheckAttempt()
+            }, remainingWait)
+        }
+    }
+
     /**
-     * Called when a valid Today signal DIFFERENT from saved_signal is found.
+     * Called when a valid new post with a DIFFERENT signal is found.
      */
     private fun onNewSignalDetected(newSignal: String) {
         isAlarmTriggered = true
         checkHandler.removeCallbacksAndMessages(null)
 
-        // 1. Immediately save the new signal and timestamp
-        val now = System.currentTimeMillis()
-        val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
-        prefs.edit()
-            .putString(Constants.PREF_SAVED_SIGNAL, newSignal)
-            .putString(Constants.PREF_LAST_CHECK_TIME, sdf.format(Date(now)))
-            .apply()
-
-        // 2. Restore 100% full screen brightness
+        // 1. Restore 100% full screen brightness
         setWindowBrightness(1.0f)
 
-        // 3. Switch UI to high-visibility Alarm Screen
+        // 2. Switch UI to high-visibility Alarm Screen
         binding.layoutWebContainer.visibility = View.GONE
         binding.layoutAlarmTriggered.visibility = View.VISIBLE
         binding.tvNewSignalContent.text = newSignal
 
-        // 4. Raise STREAM_ALARM to maximum and start continuous looping alarm + vibration
+        // 3. Raise STREAM_ALARM to maximum and start continuous looping alarm + vibration
         AlarmSoundManager.startAlarm(this)
     }
 
@@ -285,7 +300,7 @@ class NightCheckActivity : AppCompatActivity() {
     }
 
     /**
-     * Silently finish activity when max attempts pass without a new signal.
+     * Silently finish activity when max attempts pass without a new post or signal was identical.
      */
     private fun finishSilentlyAndReschedule() {
         checkHandler.removeCallbacksAndMessages(null)
