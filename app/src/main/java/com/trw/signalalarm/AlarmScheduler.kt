@@ -13,31 +13,105 @@ import java.util.Locale
 object AlarmScheduler {
     private const val TAG = "AlarmScheduler"
 
+    fun getCheck1Hour(context: Context): Int {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getInt(Constants.PREF_CHECK_1_HOUR, Constants.DEFAULT_CHECK_1_HOUR)
+    }
+
+    fun getCheck1Minute(context: Context): Int {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getInt(Constants.PREF_CHECK_1_MINUTE, Constants.DEFAULT_CHECK_1_MINUTE)
+    }
+
+    fun isCheck1Enabled(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(Constants.PREF_CHECK_1_ENABLED, true)
+    }
+
+    fun setCheck1Time(context: Context, hour: Int, minute: Int) {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putInt(Constants.PREF_CHECK_1_HOUR, hour)
+            .putInt(Constants.PREF_CHECK_1_MINUTE, minute)
+            .apply()
+    }
+
+    fun setCheck1Enabled(context: Context, enabled: Boolean) {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(Constants.PREF_CHECK_1_ENABLED, enabled).apply()
+    }
+
+    fun getCheck2Hour(context: Context): Int {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getInt(Constants.PREF_CHECK_2_HOUR, Constants.DEFAULT_CHECK_2_HOUR)
+    }
+
+    fun getCheck2Minute(context: Context): Int {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getInt(Constants.PREF_CHECK_2_MINUTE, Constants.DEFAULT_CHECK_2_MINUTE)
+    }
+
+    fun isCheck2Enabled(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(Constants.PREF_CHECK_2_ENABLED, true)
+    }
+
+    fun setCheck2Time(context: Context, hour: Int, minute: Int) {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putInt(Constants.PREF_CHECK_2_HOUR, hour)
+            .putInt(Constants.PREF_CHECK_2_MINUTE, minute)
+            .apply()
+    }
+
+    fun setCheck2Enabled(context: Context, enabled: Boolean) {
+        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(Constants.PREF_CHECK_2_ENABLED, enabled).apply()
+    }
+
+    fun formatTime(hour: Int, minute: Int): String {
+        return String.format(Locale.getDefault(), "%02d:%02d", hour, minute)
+    }
+
     /**
-     * Schedules both daily exact alarms:
-     * 1. Primary check at 02:13:00 AM
-     * 2. Backup check at 03:30:00 AM
+     * Cancels existing alarms and schedules exact alarms according to user preferences.
+     * Returns a confirmation message string.
+     */
+    fun scheduleAlarms(context: Context): String {
+        cancelAlarms(context)
+
+        val check1On = isCheck1Enabled(context)
+        val check2On = isCheck2Enabled(context)
+
+        val h1 = getCheck1Hour(context)
+        val m1 = getCheck1Minute(context)
+        val h2 = getCheck2Hour(context)
+        val m2 = getCheck2Minute(context)
+
+        val t1 = formatTime(h1, m1)
+        val t2 = formatTime(h2, m2)
+
+        if (check1On) {
+            scheduleAlarmAt(context, h1, m1, Constants.REQUEST_CODE_ALARM_1, "Check 1 ($t1)")
+        }
+
+        if (check2On) {
+            scheduleAlarmAt(context, h2, m2, Constants.REQUEST_CODE_ALARM_2, "Check 2 ($t2)")
+        }
+
+        return when {
+            check1On && check2On -> "Alarms set for $t1 & $t2"
+            check1On -> "Alarm set for $t1 (Check 2 off)"
+            check2On -> "Alarm set for $t2 (Check 1 off)"
+            else -> "All night alarms disabled"
+        }
+    }
+
+    /**
+     * Backward-compatible alias for scheduleAlarms.
      */
     fun scheduleDailyAlarms(context: Context) {
-        scheduleAlarmAt(
-            context = context,
-            hour = Constants.ALARM_1_HOUR,
-            minute = Constants.ALARM_1_MINUTE,
-            requestCode = Constants.REQUEST_CODE_ALARM_1,
-            label = "Primary 02:13 AM"
-        )
-
-        scheduleAlarmAt(
-            context = context,
-            hour = Constants.ALARM_2_HOUR,
-            minute = Constants.ALARM_2_MINUTE,
-            requestCode = Constants.REQUEST_CODE_ALARM_2,
-            label = "Backup 03:30 AM"
-        )
-
-        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(Constants.PREF_WATCH_ENABLED, true).apply()
-        Log.d(TAG, "Both alarms (02:13 AM and 03:30 AM) successfully scheduled.")
+        scheduleAlarms(context)
     }
 
     private fun scheduleAlarmAt(
@@ -66,6 +140,7 @@ object AlarmScheduler {
             action = "com.trw.signalalarm.ACTION_NIGHT_CHECK"
             putExtra("EXTRA_ALARM_HOUR", hour)
             putExtra("EXTRA_ALARM_MINUTE", minute)
+            putExtra("EXTRA_REQUEST_CODE", requestCode)
         }
 
         val pendingIntent = PendingIntent.getBroadcast(
@@ -111,16 +186,15 @@ object AlarmScheduler {
     }
 
     /**
-     * Cancels both scheduled alarms (02:13 AM and 03:30 AM).
+     * Cancels both scheduled alarms (Check 1 and Check 2).
      */
-    fun cancelDailyAlarms(context: Context) {
+    fun cancelAlarms(context: Context) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
 
         val intent = Intent(context, AlarmReceiver::class.java).apply {
             action = "com.trw.signalalarm.ACTION_NIGHT_CHECK"
         }
 
-        // Cancel 02:13 AM
         val p1 = PendingIntent.getBroadcast(
             context,
             Constants.REQUEST_CODE_ALARM_1,
@@ -129,7 +203,6 @@ object AlarmScheduler {
         )
         alarmManager.cancel(p1)
 
-        // Cancel 03:30 AM
         val p2 = PendingIntent.getBroadcast(
             context,
             Constants.REQUEST_CODE_ALARM_2,
@@ -138,26 +211,35 @@ object AlarmScheduler {
         )
         alarmManager.cancel(p2)
 
-        Log.d(TAG, "Both alarms canceled.")
-        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putBoolean(Constants.PREF_WATCH_ENABLED, false).apply()
+        Log.d(TAG, "Night alarms canceled.")
     }
 
     /**
-     * Checks if the watch switch is enabled.
+     * Backward-compatible alias for cancelAlarms.
      */
-    fun isWatchEnabled(context: Context): Boolean {
-        val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getBoolean(Constants.PREF_WATCH_ENABLED, false)
+    fun cancelDailyAlarms(context: Context) {
+        cancelAlarms(context)
     }
 
     /**
-     * Calculates which alarm is coming next and formats a human readable string.
+     * Returns a human readable string describing the upcoming alarm.
      */
-    fun getNextAlarmFormatted(): String {
+    fun getStatusSummary(context: Context): String {
+        val check1On = isCheck1Enabled(context)
+        val check2On = isCheck2Enabled(context)
+
+        if (!check1On && !check2On) {
+            return "Κατάσταση: Όλοι οι έλεγχοι είναι ανενεργοί"
+        }
+
+        val h1 = getCheck1Hour(context)
+        val m1 = getCheck1Minute(context)
+        val h2 = getCheck2Hour(context)
+        val m2 = getCheck2Minute(context)
+
         val cal1 = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, Constants.ALARM_1_HOUR)
-            set(Calendar.MINUTE, Constants.ALARM_1_MINUTE)
+            set(Calendar.HOUR_OF_DAY, h1)
+            set(Calendar.MINUTE, m1)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
             if (timeInMillis <= System.currentTimeMillis()) {
@@ -166,8 +248,8 @@ object AlarmScheduler {
         }
 
         val cal2 = Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, Constants.ALARM_2_HOUR)
-            set(Calendar.MINUTE, Constants.ALARM_2_MINUTE)
+            set(Calendar.HOUR_OF_DAY, h2)
+            set(Calendar.MINUTE, m2)
             set(Calendar.SECOND, 0)
             set(Calendar.MILLISECOND, 0)
             if (timeInMillis <= System.currentTimeMillis()) {
@@ -175,9 +257,22 @@ object AlarmScheduler {
             }
         }
 
-        val nextCal = if (cal1.timeInMillis <= cal2.timeInMillis) cal1 else cal2
         val sdf = SimpleDateFormat("EEE, dd MMM - HH:mm", Locale.getDefault())
-        val nextTimeStr = sdf.format(nextCal.time)
-        return "Επόμενο: $nextTimeStr (Πρόγραμμα: 02:13 & 03:30 π.μ.)"
+
+        return when {
+            check1On && check2On -> {
+                val nextCal = if (cal1.timeInMillis <= cal2.timeInMillis) cal1 else cal2
+                val nextStr = sdf.format(nextCal.time)
+                "Επόμενο: $nextStr (Ενεργά: ${formatTime(h1, m1)} & ${formatTime(h2, m2)})"
+            }
+            check1On -> {
+                val nextStr = sdf.format(cal1.time)
+                "Επόμενο: $nextStr (Check 1: ${formatTime(h1, m1)} | Check 2: Off)"
+            }
+            else -> {
+                val nextStr = sdf.format(cal2.time)
+                "Επόμενο: $nextStr (Check 2: ${formatTime(h2, m2)} | Check 1: Off)"
+            }
+        }
     }
 }

@@ -2,6 +2,7 @@ package com.trw.signalalarm
 
 import android.Manifest
 import android.app.AlarmManager
+import android.app.TimePickerDialog
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
@@ -63,8 +64,8 @@ class MainActivity : AppCompatActivity() {
         setupUI()
         setupBackNavigation()
 
-        // Initial check for permissions if enabled
-        if (AlarmScheduler.isWatchEnabled(this)) {
+        // Initial check for permissions if any alarm is enabled
+        if (AlarmScheduler.isCheck1Enabled(this) || AlarmScheduler.isCheck2Enabled(this)) {
             checkAndRequestPermissions()
         }
     }
@@ -72,6 +73,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         updateStatusDisplay()
+        updateAlarmUI()
     }
 
     private fun setupUI() {
@@ -83,26 +85,69 @@ class MainActivity : AppCompatActivity() {
             readAndSaveCurrentSignal()
         }
 
-        // 3. Dual Alarm Switch (02:13 & 03:30 AM)
-        val isWatchEnabled = AlarmScheduler.isWatchEnabled(this)
-        binding.switchDailyAlarm.isChecked = isWatchEnabled
-        updateAlarmStatusText(isWatchEnabled)
+        // 3. Initialize Check 1 & Check 2 UI
+        updateAlarmUI()
 
-        binding.switchDailyAlarm.setOnCheckedChangeListener { _, isChecked ->
+        // Click on Check 1 Time button -> open TimePickerDialog (24-hour format)
+        binding.btnCheck1Time.setOnClickListener {
+            val currentH = AlarmScheduler.getCheck1Hour(this)
+            val currentM = AlarmScheduler.getCheck1Minute(this)
+            val dialog = TimePickerDialog(
+                this,
+                { _, hourOfDay, minute ->
+                    AlarmScheduler.setCheck1Time(this, hourOfDay, minute)
+                    val confirmMsg = AlarmScheduler.scheduleAlarms(this)
+                    updateAlarmUI()
+                    Toast.makeText(this, confirmMsg, Toast.LENGTH_LONG).show()
+                },
+                currentH,
+                currentM,
+                true // 24-hour mode
+            )
+            dialog.setTitle("Επιλογή Ώρας Check 1")
+            dialog.show()
+        }
+
+        // Switch for Check 1
+        binding.switchCheck1.setOnCheckedChangeListener { _, isChecked ->
+            AlarmScheduler.setCheck1Enabled(this, isChecked)
             if (isChecked) {
                 checkAndRequestPermissions()
-                AlarmScheduler.scheduleDailyAlarms(this)
-                updateAlarmStatusText(true)
-                Toast.makeText(
-                    this,
-                    "Ενεργοποιήθηκε!\n${AlarmScheduler.getNextAlarmFormatted()}",
-                    Toast.LENGTH_LONG
-                ).show()
-            } else {
-                AlarmScheduler.cancelDailyAlarms(this)
-                updateAlarmStatusText(false)
-                Toast.makeText(this, "Οι νυχτερινοί έλεγχοι απενεργοποιήθηκαν.", Toast.LENGTH_SHORT).show()
             }
+            val confirmMsg = AlarmScheduler.scheduleAlarms(this)
+            updateAlarmUI()
+            Toast.makeText(this, confirmMsg, Toast.LENGTH_SHORT).show()
+        }
+
+        // Click on Check 2 Time button -> open TimePickerDialog (24-hour format)
+        binding.btnCheck2Time.setOnClickListener {
+            val currentH = AlarmScheduler.getCheck2Hour(this)
+            val currentM = AlarmScheduler.getCheck2Minute(this)
+            val dialog = TimePickerDialog(
+                this,
+                { _, hourOfDay, minute ->
+                    AlarmScheduler.setCheck2Time(this, hourOfDay, minute)
+                    val confirmMsg = AlarmScheduler.scheduleAlarms(this)
+                    updateAlarmUI()
+                    Toast.makeText(this, confirmMsg, Toast.LENGTH_LONG).show()
+                },
+                currentH,
+                currentM,
+                true // 24-hour mode
+            )
+            dialog.setTitle("Επιλογή Ώρας Check 2 (Backup)")
+            dialog.show()
+        }
+
+        // Switch for Check 2
+        binding.switchCheck2.setOnCheckedChangeListener { _, isChecked ->
+            AlarmScheduler.setCheck2Enabled(this, isChecked)
+            if (isChecked) {
+                checkAndRequestPermissions()
+            }
+            val confirmMsg = AlarmScheduler.scheduleAlarms(this)
+            updateAlarmUI()
+            Toast.makeText(this, confirmMsg, Toast.LENGTH_SHORT).show()
         }
 
         // 4. Test Alarm Sound & Stop Buttons
@@ -128,11 +173,35 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // 6. Floating Reload Button
+        // 6. Floating Reload Button with cache-clearing
         binding.fabReloadWeb.setOnClickListener {
+            binding.webView.clearCache(true)
             binding.webView.reload()
-            Toast.makeText(this, "Ανανέωση chat...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Ανανέωση chat (χωρίς cache)...", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun updateAlarmUI() {
+        val h1 = AlarmScheduler.getCheck1Hour(this)
+        val m1 = AlarmScheduler.getCheck1Minute(this)
+        val h2 = AlarmScheduler.getCheck2Hour(this)
+        val m2 = AlarmScheduler.getCheck2Minute(this)
+
+        binding.btnCheck1Time.text = AlarmScheduler.formatTime(h1, m1)
+        binding.btnCheck2Time.text = AlarmScheduler.formatTime(h2, m2)
+
+        binding.switchCheck1.isChecked = AlarmScheduler.isCheck1Enabled(this)
+        binding.switchCheck2.isChecked = AlarmScheduler.isCheck2Enabled(this)
+
+        val summary = AlarmScheduler.getStatusSummary(this)
+        binding.tvAlarmStatus.text = summary
+        val anyActive = AlarmScheduler.isCheck1Enabled(this) || AlarmScheduler.isCheck2Enabled(this)
+        binding.tvAlarmStatus.setTextColor(
+            ContextCompat.getColor(
+                this,
+                if (anyActive) R.color.alarm_green else R.color.text_secondary
+            )
+        )
     }
 
     private fun updateStatusDisplay() {
@@ -151,47 +220,53 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun updateAlarmStatusText(isEnabled: Boolean) {
-        if (isEnabled) {
-            binding.tvAlarmStatus.text = AlarmScheduler.getNextAlarmFormatted()
-            binding.tvAlarmStatus.setTextColor(ContextCompat.getColor(this, R.color.alarm_green))
-        } else {
-            binding.tvAlarmStatus.text = getString(R.string.alarm_status_off)
-            binding.tvAlarmStatus.setTextColor(ContextCompat.getColor(this, R.color.text_secondary))
-        }
-    }
-
     /**
      * Reads the current rendered DOM of the WebView, extracts the signal,
-     * saves it to SharedPreferences, and updates the UI.
+     * checks for Today validity, saves it to SharedPreferences, and updates the UI.
      */
     private fun readAndSaveCurrentSignal() {
-        Toast.makeText(this, "Ανάγνωση σήματος από τη σελίδα...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Ανάγνωση σήματος και κύλιση κάτω...", Toast.LENGTH_SHORT).show()
 
-        SignalExtractor.extractLatestSignal(binding.webView) { latestSignal ->
-            if (latestSignal.isNotBlank()) {
-                val now = System.currentTimeMillis()
-                val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
-                val formattedDate = sdf.format(Date(now))
+        // 1. First trigger auto-scroll
+        SignalExtractor.scrollToBottom(binding.webView) {
+            // 2. Extract signal
+            SignalExtractor.extractLatestSignal(binding.webView) { result ->
+                if (result.signal.isNotBlank()) {
+                    val now = System.currentTimeMillis()
+                    val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+                    val formattedDate = sdf.format(Date(now))
 
-                prefs.edit()
-                    .putString(Constants.PREF_SAVED_SIGNAL, latestSignal)
-                    .putString(Constants.PREF_LAST_CHECK_TIME, formattedDate)
-                    .apply()
+                    prefs.edit()
+                        .putString(Constants.PREF_SAVED_SIGNAL, result.signal)
+                        .putString(Constants.PREF_LAST_CHECK_TIME, formattedDate)
+                        .apply()
 
-                updateStatusDisplay()
+                    updateStatusDisplay()
 
-                AlertDialog.Builder(this)
-                    .setTitle("✅ Signal Αποθηκεύτηκε!")
-                    .setMessage("Το τελευταίο signal αποθηκεύτηκε επιτυχώς:\n\n$latestSignal")
-                    .setPositiveButton("OK", null)
-                    .show()
-            } else {
-                AlertDialog.Builder(this)
-                    .setTitle("⚠️ Δεν βρέθηκε Signal")
-                    .setMessage("Δεν εντοπίστηκε κείμενο με τίτλο 'Portfolio Signal Update' και '@I Understand The Signals'.\n\nΒεβαιωθείτε ότι είστε συνδεδεμένοι στο The Real World και ότι το κανάλι έχει φορτώσει πλήρως.")
-                    .setPositiveButton("OK", null)
-                    .show()
+                    val title = if (result.isToday) {
+                        "✅ Σημερινό Signal Αποθηκεύτηκε!"
+                    } else {
+                        "⚠️ Signal Αποθηκεύτηκε (Χωρίς 'Today')"
+                    }
+
+                    val message = if (result.isToday) {
+                        "Το σημερινό signal αποθηκεύτηκε επιτυχώς:\n\n${result.signal}"
+                    } else {
+                        "Προσοχή: Δεν εντοπίστηκε διαχωριστικό 'Today' πριν από το μήνυμα (πιθανώς παλιό μήνυμα ή δεν έγινε scroll στο τέλος).\n\nSignal:\n${result.signal}"
+                    }
+
+                    AlertDialog.Builder(this)
+                        .setTitle(title)
+                        .setMessage(message)
+                        .setPositiveButton("OK", null)
+                        .show()
+                } else {
+                    AlertDialog.Builder(this)
+                        .setTitle("⚠️ Δεν βρέθηκε Signal")
+                        .setMessage("Δεν εντοπίστηκε κείμενο με τίτλο 'Portfolio Signal Update' και '@I Understand The Signals'.\n\nΒεβαιωθείτε ότι είστε συνδεδεμένοι στο The Real World και ότι το κανάλι έχει φορτώσει πλήρως.")
+                        .setPositiveButton("OK", null)
+                        .show()
+                }
             }
         }
     }
@@ -204,7 +279,9 @@ class MainActivity : AppCompatActivity() {
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
         settings.userAgentString = USER_AGENT
-        settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+        // Cache-busting mode: do not use stale cache
+        settings.cacheMode = WebSettings.LOAD_NO_CACHE
 
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
@@ -263,7 +340,7 @@ class MainActivity : AppCompatActivity() {
             if (alarmManager?.canScheduleExactAlarms() == false) {
                 AlertDialog.Builder(this)
                     .setTitle("Απαραίτητη Άδεια Exact Alarm")
-                    .setMessage("Για να εκτελούνται αυτόματα οι ακριβείς έλεγχοι στις 02:13 & 03:30 π.μ., παρακαλούμε ενεργοποιήστε την άδεια ακριβούς ξυπνητηριού.")
+                    .setMessage("Για να εκτελούνται αυτόματα οι ακριβείς νυχτερινοί έλεγχοι, παρακαλούμε ενεργοποιήστε την άδεια ακριβούς ξυπνητηριού.")
                     .setPositiveButton("Ρυθμίσεις") { _, _ ->
                         try {
                             val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {

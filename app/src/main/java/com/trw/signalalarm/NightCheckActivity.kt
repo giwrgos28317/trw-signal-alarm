@@ -36,9 +36,8 @@ class NightCheckActivity : AppCompatActivity() {
     private val checkHandler = Handler(Looper.getMainLooper())
     private var wakeLock: PowerManager.WakeLock? = null
 
-    private var checkStartTime: Long = 0L
     private var isAlarmTriggered = false
-    private var checkCount = 0
+    private var checkAttempt = 0
     private var triggerSlot: String = "02:13"
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -59,7 +58,6 @@ class NightCheckActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-        checkStartTime = System.currentTimeMillis()
 
         // 4. Setup STOP ALARM button click listener
         binding.btnStopNightAlarm.setOnClickListener {
@@ -69,8 +67,8 @@ class NightCheckActivity : AppCompatActivity() {
         // 5. Initialize WebView for TRW
         setupNightWebView()
 
-        // 6. Start the checking cycle (10-minute window)
-        startCheckCycle()
+        // 6. Start the checking cycle (up to MAX_CHECK_ATTEMPTS attempts)
+        startCheckAttempt()
     }
 
     private fun setupLockscreenWakeFlags() {
@@ -102,7 +100,7 @@ class NightCheckActivity : AppCompatActivity() {
             PowerManager.SCREEN_DIM_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
             "TRW:NightCheckActivityWakeLock"
         )?.apply {
-            acquire(12 * 60 * 1000L) // 12 minutes max safeguard
+            acquire(15 * 60 * 1000L) // 15 minutes max safeguard
         }
     }
 
@@ -114,7 +112,9 @@ class NightCheckActivity : AppCompatActivity() {
         settings.domStorageEnabled = true
         settings.databaseEnabled = true
         settings.userAgentString = USER_AGENT
-        settings.cacheMode = WebSettings.LOAD_DEFAULT
+
+        // Cache-busting mode: do not load cached stale page
+        settings.cacheMode = WebSettings.LOAD_NO_CACHE
 
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
@@ -130,73 +130,118 @@ class NightCheckActivity : AppCompatActivity() {
     }
 
     /**
-     * Repeats check cycle every 45 seconds for a 10-minute window.
+     * Executes one check attempt, re-checking every 45s up to MAX_CHECK_ATTEMPTS.
      */
-    private fun startCheckCycle() {
+    private fun startCheckAttempt() {
         if (isAlarmTriggered || isFinishing || isDestroyed) return
 
-        val now = System.currentTimeMillis()
-        val elapsed = now - checkStartTime
-
-        // Check if 10-minute window has expired
-        if (elapsed >= Constants.MAX_CHECK_DURATION_MS) {
-            Log.d(TAG, "Check duration exceeded 10 minutes for $triggerSlot slot. No new signal. Finishing silently.")
+        if (checkAttempt >= Constants.MAX_CHECK_ATTEMPTS) {
+            Log.d(TAG, "Reached max attempts (${Constants.MAX_CHECK_ATTEMPTS}) for $triggerSlot slot. Finishing silently.")
             finishSilentlyAndReschedule()
             return
         }
 
-        checkCount++
+        checkAttempt++
+        val now = System.currentTimeMillis()
         val sdf = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         val formattedTime = sdf.format(Date(now))
-        binding.tvNightTimeElapsed.text = "Έλεγχος slot $triggerSlot (#$checkCount στις $formattedTime)"
 
-        Log.d(TAG, "Starting Check #$checkCount for slot $triggerSlot at $formattedTime (Elapsed: ${elapsed / 1000}s)")
+        binding.tvNightCheckStatus.text = "Έλεγχος slot $triggerSlot (#$checkAttempt/${Constants.MAX_CHECK_ATTEMPTS})..."
+        binding.tvNightTimeElapsed.text = "Ώρα: $formattedTime"
 
-        // 1. Reload the target chat page
-        binding.nightWebView.loadUrl(Constants.TARGET_URL)
+        Log.d(TAG, "Starting Attempt #$checkAttempt of ${Constants.MAX_CHECK_ATTEMPTS} for slot $triggerSlot at $formattedTime")
 
-        // 2. Wait 15 seconds for dynamic DOM and chat messages to fully load
+        // 1. Clear cache & reload with timestamp parameter
+        binding.nightWebView.clearCache(true)
+        val separator = if (Constants.TARGET_URL.contains("?")) "&" else "?"
+        val cacheBustUrl = "${Constants.TARGET_URL}${separator}_ts=${System.currentTimeMillis()}"
+        binding.nightWebView.loadUrl(cacheBustUrl)
+
+        // 2. Wait 15 seconds for dynamic DOM and chat messages to load
         checkHandler.postDelayed({
             if (!isAlarmTriggered && !isFinishing && !isDestroyed) {
-                executeSignalCheck()
+                // Auto-scroll to bottom of chat
+                SignalExtractor.scrollToBottom(binding.nightWebView) {
+                    // Small delay to allow any lazy rendering after scroll
+                    checkHandler.postDelayed({
+                        if (!isAlarmTriggered && !isFinishing && !isDestroyed) {
+                            evaluateExtractedSignal()
+                        }
+                    }, 1500L)
+                }
             }
         }, Constants.PAGE_LOAD_WAIT_MS)
     }
 
     /**
-     * Extracts signal using JavaScript and evaluates if alarm should be triggered.
+     * Evaluates the extracted signal and applies the Today logic:
+     * - If isToday == false: do NOT compare with saved_signal; retry in next attempt.
+     * - If isToday == true: compare with saved_signal; if different, alarm!
      */
-    private fun executeSignalCheck() {
-        SignalExtractor.extractLatestSignal(binding.nightWebView) { latestSignal ->
+    private fun evaluateExtractedSignal() {
+        SignalExtractor.extractLatestSignal(binding.nightWebView) { result ->
             if (isAlarmTriggered || isFinishing || isDestroyed) return@extractLatestSignal
 
-            val savedSignal = prefs.getString(Constants.PREF_SAVED_SIGNAL, "") ?: ""
-            Log.d(TAG, "Extracted signal length=${latestSignal.length}")
-            Log.d(TAG, "Saved signal length=${savedSignal.length}")
+            Log.d(TAG, "Attempt #$checkAttempt: isToday=${result.isToday}, signalLength=${result.signal.length}")
 
-            if (latestSignal.isNotBlank()) {
-                // If savedSignal is empty, or latestSignal differs from savedSignal
-                if (savedSignal.isEmpty() || latestSignal != savedSignal) {
-                    Log.i(TAG, "🚨 NEW SIGNAL DETECTED at $triggerSlot! Triggering Alarm! 🚨")
-                    onNewSignalDetected(latestSignal)
+            // 1. If NOT Today: do NOT compare with old messages!
+            if (!result.isToday) {
+                Log.w(TAG, "Attempt #$checkAttempt: isToday is FALSE. Message is from yesterday or not posted yet. Skipping comparison.")
+
+                if (checkAttempt >= Constants.MAX_CHECK_ATTEMPTS) {
+                    Log.d(TAG, "Max attempts reached with isToday=false. Finishing silently.")
+                    finishSilentlyAndReschedule()
                     return@extractLatestSignal
-                } else {
-                    Log.d(TAG, "Signal is IDENTICAL to saved_signal. Continuing watch.")
                 }
-            } else {
-                Log.w(TAG, "No signal extracted (empty result). Will retry in next cycle.")
+
+                // Schedule next attempt in 45s cycle
+                val remainingWait = (Constants.CHECK_INTERVAL_MS - Constants.PAGE_LOAD_WAIT_MS - 1500L).coerceAtLeast(10_000L)
+                binding.tvNightCheckStatus.text = "Αναμονή για σημερινό signal... Επανάληψη σε 45s (#$checkAttempt/${Constants.MAX_CHECK_ATTEMPTS})"
+                checkHandler.postDelayed({
+                    startCheckAttempt()
+                }, remainingWait)
+                return@extractLatestSignal
             }
 
-            // Schedule next check cycle at 45 seconds from now
-            val remainingInCycle = Constants.CHECK_INTERVAL_MS - Constants.PAGE_LOAD_WAIT_MS
-            checkHandler.postDelayed({
-                startCheckCycle()
-            }, remainingInCycle.coerceAtLeast(5000L))
+            // 2. isToday is TRUE: compare with saved_signal
+            val savedSignal = prefs.getString(Constants.PREF_SAVED_SIGNAL, "") ?: ""
+            Log.d(TAG, "Attempt #$checkAttempt: isToday is TRUE! Comparing with saved_signal.")
+            Log.d(TAG, "Saved: $savedSignal")
+            Log.d(TAG, "New: ${result.signal}")
+
+            if (result.signal.isNotBlank()) {
+                if (savedSignal.isEmpty() || result.signal != savedSignal) {
+                    Log.i(TAG, "🚨 NEW TODAY SIGNAL DETECTED at $triggerSlot! Triggering Alarm! 🚨")
+                    onNewSignalDetected(result.signal)
+                    return@extractLatestSignal
+                } else {
+                    Log.d(TAG, "Today's signal is IDENTICAL to saved_signal.")
+                    if (checkAttempt >= Constants.MAX_CHECK_ATTEMPTS) {
+                        Log.d(TAG, "All attempts finished. Signal remained identical. Finishing silently.")
+                        finishSilentlyAndReschedule()
+                    } else {
+                        val remainingWait = (Constants.CHECK_INTERVAL_MS - Constants.PAGE_LOAD_WAIT_MS - 1500L).coerceAtLeast(10_000L)
+                        binding.tvNightCheckStatus.text = "Signal ταυτόσημο με αποθηκευμένο. Επανέλεγχος σε 45s (#$checkAttempt/${Constants.MAX_CHECK_ATTEMPTS})"
+                        checkHandler.postDelayed({
+                            startCheckAttempt()
+                        }, remainingWait)
+                    }
+                }
+            } else {
+                if (checkAttempt >= Constants.MAX_CHECK_ATTEMPTS) {
+                    finishSilentlyAndReschedule()
+                } else {
+                    val remainingWait = (Constants.CHECK_INTERVAL_MS - Constants.PAGE_LOAD_WAIT_MS - 1500L).coerceAtLeast(10_000L)
+                    checkHandler.postDelayed({
+                        startCheckAttempt()
+                    }, remainingWait)
+                }
+            }
         }
     }
 
     /**
-     * Called when a valid signal DIFFERENT from saved_signal is found.
+     * Called when a valid Today signal DIFFERENT from saved_signal is found.
      */
     private fun onNewSignalDetected(newSignal: String) {
         isAlarmTriggered = true
@@ -230,7 +275,7 @@ class NightCheckActivity : AppCompatActivity() {
         AlarmSoundManager.stopAlarm(this)
 
         // Reschedule upcoming daily alarms
-        AlarmScheduler.scheduleDailyAlarms(this)
+        AlarmScheduler.scheduleAlarms(this)
 
         // Dismiss notification
         NotificationManagerCompat.from(this).cancel(Constants.NOTIFICATION_ID)
@@ -240,13 +285,13 @@ class NightCheckActivity : AppCompatActivity() {
     }
 
     /**
-     * Silently finish activity when 10 minutes pass without a new signal.
+     * Silently finish activity when max attempts pass without a new signal.
      */
     private fun finishSilentlyAndReschedule() {
         checkHandler.removeCallbacksAndMessages(null)
 
         // Reschedule upcoming daily alarms
-        AlarmScheduler.scheduleDailyAlarms(this)
+        AlarmScheduler.scheduleAlarms(this)
 
         // Dismiss notification
         NotificationManagerCompat.from(this).cancel(Constants.NOTIFICATION_ID)
